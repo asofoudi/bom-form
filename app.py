@@ -1,46 +1,66 @@
 import streamlit as st
+import pandas as pd
+from datetime import datetime
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-st.title("Ερωτηματολόγιο Πελάτη για Άρδευση")
+st.set_page_config(page_title="BOM Υπολογισμός", page_icon="🌱")
 
-# --- Στοιχεία Πελάτη ---
-st.header("🧑‍💼 Στοιχεία Πελάτη")
-first_name = st.text_input("Όνομα")
-last_name = st.text_input("Επώνυμο")
-location = st.text_input("Τοποθεσία")
-phone = st.text_input("Τηλέφωνο")
+# ------------------------
+# Google Sheet setup (You must replace with your own credentials and sheet)
+# ------------------------
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+credentials = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
+client = gspread.authorize(credentials)
+sheet = client.open("BOM Ερωτηματολόγιο").sheet1
 
-# --- Διαστάσεις Χωραφιού ---
-st.header("🌾 Διαστάσεις Χωραφιού")
-length = st.number_input("Μήκος (m)", min_value=0.0, step=1.0)
-width = st.number_input("Πλάτος (m)", min_value=0.0, step=1.0)
-area = st.number_input("Στρέμματα", min_value=0.0, step=0.1)
+# ------------------------
+# Σελίδα 1: Γενικά Στοιχεία Παραγωγού
+# ------------------------
+st.title("1. ΓΕΝΙΚΑ ΣΤΟΙΧΕΙΑ ΠΑΡΑΓΩΓΟΥ & ΑΓΡΟΤΕΜΑΧΙΟΥ")
 
-# --- Φύτευση ---
-st.header("🌱 Πληροφορίες Φύτευσης")
-in_row_spacing = st.number_input("Απόσταση φύτευσης επί της γραμμής (cm)", min_value=1.0)
-between_row_spacing = st.number_input("Πλάτος διαδρόμου (cm)", min_value=1.0)
+st.markdown("Συμπληρώστε τα παρακάτω πεδία με στοιχεία παραγωγού και αγροτεμαχίου.")
 
-# --- Υπολογισμός BOM ---
-if st.button("Υπολογισμός BOM"):
-    if length > 0 and width > 0 and in_row_spacing > 0 and between_row_spacing > 0:
-        # Μετατροπή cm σε m
-        in_row_spacing_m = in_row_spacing / 100
-        between_row_spacing_m = between_row_spacing / 100
+with st.form("form_farm"):
+    col1, col2 = st.columns(2)
+    with col1:
+        name = st.text_input("Ονοματεπώνυμο")
+        location = st.text_input("Τοποθεσία αγροτεμαχίου (περιοχή/χωριό)")
+        field_area_declared = st.number_input("Έκταση αγροτεμαχίου (σε στρέμματα)", min_value=0.0, step=0.1)
+        row_spacing = st.number_input("Απόσταση μεταξύ σειρών (m)", min_value=0.0, step=0.1)
+    with col2:
+        phone = st.text_input("Τηλέφωνο επικοινωνίας")
+        dimensions = st.text_input("Διαστάσεις χωραφιού (π.χ. 80x120)")
+        tree_spacing = st.number_input("Απόσταση δέντρων πάνω στη σειρά (m)", min_value=0.0, step=0.1)
+        support_type = st.selectbox("Τύπος Υποστύλωσης", ["Κρεβατίνα", "ΤΑΦ", "Άλλο"])
 
-        num_rows = int(width / between_row_spacing_m)
-        plants_per_row = int(length / in_row_spacing_m)
-        total_plants = num_rows * plants_per_row
-        total_laid_pipe = num_rows * length
+    submitted = st.form_submit_button("Υπολογισμός")
 
-        st.success("✅ Υπολογισμός Ολοκληρώθηκε!")
+    if submitted:
+        try:
+            dims = dimensions.lower().replace("μ", "").replace("m", "").replace(" ", "").split("x")
+            if len(dims) == 2:
+                length = float(dims[0])
+                width = float(dims[1])
+                area_from_dims = round((length * width) / 1000, 2)
 
-        st.markdown("### 📋 Αποτελέσματα Υπολογισμών:")
-        st.write(f"- Αριθμός γραμμών: **{num_rows}**")
-        st.write(f"- Φυτά ανά γραμμή: **{plants_per_row}**")
-        st.write(f"- Συνολικός αριθμός φυτών: **{total_plants}**")
-        st.write(f"- Συνολικό μήκος λάστιχου: **{total_laid_pipe:.2f} m**")
+                st.markdown("### 📏 Έλεγχος έκτασης βάσει διαστάσεων:")
+                st.write(f"- Υπολογισμένη έκταση βάσει διαστάσεων: **{area_from_dims} στρέμματα**")
+                st.write(f"- Δήλωση χρήστη: **{field_area_declared} στρέμματα**")
 
-        st.markdown("---")
-        st.markdown("Μπορείς να χρησιμοποιήσεις τα παραπάνω για προσφορά ή BOM.")
-    else:
-        st.error("⚠️ Συμπλήρωσε όλα τα απαραίτητα πεδία πριν κάνεις υπολογισμό.")
+                diff = abs(area_from_dims - field_area_declared)
+                if diff > 0.5:
+                    st.warning("⚠️ Διαφορά μεταξύ διαστάσεων και δηλωμένης έκτασης. Ελέγξτε τα στοιχεία.")
+                else:
+                    st.success("✅ Οι διαστάσεις συμφωνούν με την έκταση.")
+
+                # Αποθήκευση στο Google Sheet
+                sheet.append_row([name, phone, location, dimensions, field_area_declared, row_spacing, tree_spacing, support_type, area_from_dims])
+
+            else:
+                st.error("⚠️ Λάθος μορφή διαστάσεων. Χρησιμοποίησε μορφή π.χ. 80x120")
+
+        except ValueError:
+            st.error("⚠️ Δώσε αριθμούς σε σωστή μορφή στο πεδίο διαστάσεων.")
+        except Exception as e:
+            st.error("⚠️ Δεν ήταν δυνατή η σύνδεση με το Google Sheet. Ελέγξτε τα credentials.")
